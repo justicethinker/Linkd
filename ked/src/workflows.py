@@ -15,8 +15,8 @@ The Fan-Out Pattern:
 """
 
 import logging
-from celery import Chain, Chord
-from .celery_app import app
+from celery.canvas import Chain, Chord
+from ..celery_app import app
 from .transcription_tasks import (
     transcribe_audio,
     embed_interests,
