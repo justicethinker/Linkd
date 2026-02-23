@@ -8,7 +8,7 @@ plugins {
 android {
     namespace = "com.linkd.linkd_app"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion "25.2.9519653"
+    ndkVersion = "25.2.9519653"
     
 
     compileOptions {
@@ -16,8 +16,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
 
     defaultConfig {
