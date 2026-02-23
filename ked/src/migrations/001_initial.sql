@@ -2,7 +2,7 @@
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id serial PRIMARY KEY,
     email text UNIQUE NOT NULL,
     hashed_password text NOT NULL,
