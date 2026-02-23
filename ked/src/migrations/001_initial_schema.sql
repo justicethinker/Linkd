@@ -58,13 +58,16 @@ ALTER TABLE interest_nodes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policy for user_persona: users can only see their own personas
+DROP POLICY IF EXISTS user_isolation_user_persona ON user_persona;
 CREATE POLICY user_isolation_user_persona ON user_persona
     USING (user_id = CURRENT_SETTING('app.current_user_id')::int);
 
 -- RLS Policy for interest_nodes: users can only see their own interests
+DROP POLICY IF EXISTS user_isolation_interest_nodes ON interest_nodes;
 CREATE POLICY user_isolation_interest_nodes ON interest_nodes
     USING (user_id = CURRENT_SETTING('app.current_user_id')::int);
 
 -- RLS Policy for conversations: users can only see their own conversations
+DROP POLICY IF EXISTS user_isolation_conversations ON conversations;
 CREATE POLICY user_isolation_conversations ON conversations
     USING (user_id = CURRENT_SETTING('app.current_user_id')::int);
