@@ -70,7 +70,7 @@ dependencies:
 
   # ML Kit
   
-  google_ml_kit: ^0.21.0 ges
+  google_ml_kit: ^0.21.0 
   
   flutter_local_notifications: ^16.3.3
 
