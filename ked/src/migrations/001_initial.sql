@@ -38,6 +38,8 @@ ALTER TABLE user_persona ENABLE ROW LEVEL SECURITY;
 ALTER TABLE interest_nodes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 
+
+DROP POLICY IF EXISTS;
 -- simple policies using a custom GUC
 CREATE POLICY user_isolation_user_persona ON user_persona
     USING (user_id = current_setting('app.current_user_id')::int);
