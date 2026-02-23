@@ -27,7 +27,7 @@ dependencies:
   flutter_slidable: ^3.1.2
 
   # Audio & Voice
-  record: ^4.4.4
+  record: ^5.0.0 # UPDATED: Fixes the AGP 8 namespace error
   flutter_sound: ^9.30.0
   just_audio: ^0.9.46
   speech_to_text: ^6.6.0
@@ -68,8 +68,13 @@ dependencies:
   firebase_storage: ^11.6.5
   cloud_firestore: ^4.17.5
 
-  # ML Kit — FIXED (critical)
-  google_ml_kit: ^0.21.0
+  # ML Kit
+  # RECOMMENDED FIX: Avoid the umbrella package to prevent massive app bloat.
+  google_ml_kit: ^0.21.0 # Remove or comment this out once you pick standalone packages
+  # Example replacements (uncomment the ones your app actually uses):
+  google_mlkit_text_recognition: ^0.14.0
+  # google_mlkit_face_detection: ^0.12.0
+  # google_mlkit_barcode_scanning: ^0.12.0
 
   flutter_local_notifications: ^16.3.3
 
