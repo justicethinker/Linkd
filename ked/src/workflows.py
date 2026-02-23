@@ -17,17 +17,17 @@ The Fan-Out Pattern:
 import logging
 from celery.canvas import chain, chord
 from src.celery_app import app
-from src.transcription_tasks import (
+from src.tasks.transcription_tasks import (
     transcribe_audio,
     embed_interests,
     store_conversation,
 )
-from src.enrichment_tasks import (
+from src.tasks.enrichment_tasks import (
     extract_name_context,
     scrape_linkedin,
     scrape_twitter,
 )
-from src.synthesis_tasks import (
+from src.tasks.synthesis_tasks import (
     recursive_insight,
     draft_warm_outreach,
     scrub_pii,
