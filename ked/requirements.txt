@@ -21,3 +21,4 @@ celery[redis]
 redis
 flower
 numpy
+python-multipart
