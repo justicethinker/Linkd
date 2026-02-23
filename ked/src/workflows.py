@@ -15,7 +15,7 @@ The Fan-Out Pattern:
 """
 
 import logging
-from celery.canvas import Chain, Chord
+from celery.canvas import chain, chord
 from ..celery_app import app
 from .transcription_tasks import (
     transcribe_audio,
@@ -75,16 +75,16 @@ def start_interaction_workflow(
     logger.info(f"[job_id={job_id}] Starting interaction workflow (user_id={user_id})")
     
     # Transcription chain: Get audio → embed → store
-    transcription_chain = Chain(
+    transcription_chain = chain(
         transcribe_audio.s(user_id, job_id, audio_file_path, mode),
         embed_interests.s(),
         store_conversation.s(),
     )
     
     # Enrichment chord: Run both scraping and PII scrubbing in parallel
-    enrichment_chord = Chord([
+    enrichment_chord = chord([
         # Scraping path: Extract names → Scrape LinkedIn → Fallback Twitter
-        Chain(
+        chain(
             extract_name_context.s(),
             scrape_linkedin.s(),
             scrape_twitter.s(),
@@ -94,13 +94,13 @@ def start_interaction_workflow(
     ])
     
     # Synthesis tasks run on aggregated enrichment results
-    synthesis_tasks = Chord([
+    synthesis_tasks = chord([
         recursive_insight.s(),
         draft_warm_outreach.s(),
     ])
     
     # Complete workflow: Transcription → Enrichment (parallel) → Synthesis → Metrics
-    workflow = Chain(
+    workflow = chain(
         transcription_chain,
         enrichment_chord,
         synthesis_tasks,
@@ -223,14 +223,14 @@ def start_interaction_workflow_v2b(
     )
     
     # Stage 1: TRANSCRIPTION
-    transcription_chain = Chain(
+    transcription_chain = chain(
         transcribe_audio.s(user_id, job_id, audio_file_path, mode),
         embed_interests.s(),
         store_conversation.s(),
     )
     
     # Stage 2 & 3: SEARCH + SCRAPE (parallel fan-out to all sources)
-    search_and_scrape = Chord([
+    search_and_scrape = chord([
         # Source dispatcher: fan-out to 6-8 sources
         # This returns aggregated results from Search, LinkedIn, GitHub, Instagram, TikTok, Twitter, YouTube, Bluesky
         # dispatch_source_queries.s(name, context, sources),
@@ -245,7 +245,7 @@ def start_interaction_workflow_v2b(
     # resolve_identity.s(user_context, candidates, interests),
     
     # Stage 5: SYNTHESIZE (triple-vector + social quadrant + outreach)
-    synthesis_tasks = Chord([
+    synthesis_tasks = chord([
         triple_vector_synthesis.s(),
         calculate_social_quadrant.s(),
         draft_warm_outreach_v2.s(),
@@ -253,7 +253,7 @@ def start_interaction_workflow_v2b(
     ])
     
     # Complete Phase 2b workflow
-    workflow = Chain(
+    workflow = chain(
         transcription_chain,
         search_and_scrape,
         synthesis_tasks,
