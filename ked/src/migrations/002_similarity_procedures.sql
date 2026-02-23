@@ -69,8 +69,7 @@ CREATE OR REPLACE FUNCTION avg_vector_similarity(
 RETURNS FLOAT AS $$
 BEGIN
     RETURN (1 - (p_vector1 <=> p_vector2))::FLOAT;
-END;
-$$ LANGUAGE plpgsql;
+
 
 -- Function to find top synapses with context (persona weight-adjusted)
 -- This returns weighted matches considering both similarity and persona weight
