@@ -1,7 +1,7 @@
 -- initial schema for Linkd backend
-
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- 1. Create Tables with safety checks
 CREATE TABLE IF NOT EXISTS users (
     id serial PRIMARY KEY,
     email text UNIQUE NOT NULL,
@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     created_at timestamptz DEFAULT now()
 );
 
-CREATE TABLE user_persona (
+CREATE TABLE IF NOT EXISTS user_persona (
     id serial PRIMARY KEY,
     user_id int NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     label text NOT NULL,
@@ -17,7 +17,7 @@ CREATE TABLE user_persona (
     vector vector(1536)
 );
 
-CREATE TABLE interest_nodes (
+CREATE TABLE IF NOT EXISTS interest_nodes (
     id serial PRIMARY KEY,
     user_id int NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     label text NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE interest_nodes (
     created_at timestamptz DEFAULT now()
 );
 
-CREATE TABLE conversations (
+CREATE TABLE IF NOT EXISTS conversations (
     id serial PRIMARY KEY,
     user_id int NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     transcript text,
@@ -33,17 +33,20 @@ CREATE TABLE conversations (
     created_at timestamptz DEFAULT now()
 );
 
--- enable row level security for multi-tenant isolation
+-- 2. Enable Row Level Security
 ALTER TABLE user_persona ENABLE ROW LEVEL SECURITY;
 ALTER TABLE interest_nodes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 
-
-DROP POLICY IF EXISTS;
--- simple policies using a custom GUC
+-- 3. Drop and Re-create Policies (Postgres workaround for IF NOT EXISTS)
+DROP POLICY IF EXISTS user_isolation_user_persona ON user_persona;
 CREATE POLICY user_isolation_user_persona ON user_persona
     USING (user_id = current_setting('app.current_user_id')::int);
+
+DROP POLICY IF EXISTS user_isolation_interest_nodes ON interest_nodes;
 CREATE POLICY user_isolation_interest_nodes ON interest_nodes
     USING (user_id = current_setting('app.current_user_id')::int);
+
+DROP POLICY IF EXISTS user_isolation_conversations ON conversations;
 CREATE POLICY user_isolation_conversations ON conversations
     USING (user_id = current_setting('app.current_user_id')::int);
