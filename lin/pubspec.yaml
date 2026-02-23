@@ -27,7 +27,7 @@ dependencies:
   flutter_slidable: ^3.1.2
 
   # Audio & Voice
-  record: ^5.0.0 # UPDATED: Fixes the AGP 8 namespace error
+  record: ^6.2.0
   flutter_sound: ^9.30.0
   just_audio: ^0.9.46
   speech_to_text: ^6.6.0
