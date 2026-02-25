@@ -1,20 +1,22 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 from .. import models, db
 from ..services.metrics_service import MetricsService
+from ..auth import get_current_user
+from ..exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 
 
 class FeedbackRequest(BaseModel):
-    feedback_type: str  # "approved", "rejected", "rated"
-    rating: Optional[int] = None  # 1-5 stars
-    notes: Optional[str] = None
+    feedback_type: str = Field(..., pattern="^(approved|rejected|rated)$")  # "approved", "rejected", "rated"
+    rating: Optional[int] = Field(None, ge=1, le=5)  # 1-5 stars
+    notes: Optional[str] = Field(None, max_length=500)
 
 
 class MetricsResponse(BaseModel):
@@ -35,23 +37,29 @@ def get_db():
         session.close()
 
 
-@router.post("/persona/{persona_id}")
+@router.post("/persona/{persona_id}", status_code=status.HTTP_200_OK)
 def submit_persona_feedback(
-    user_id: int,
     persona_id: int,
     feedback: FeedbackRequest,
+    user_id: int = Depends(get_current_user),
     db_session: Session = Depends(get_db),
 ):
     """Submit feedback on a persona node (approve, reject, or rate).
     
     Args:
-        user_id: User ID
         persona_id: Persona ID
         feedback: FeedbackRequest with feedback_type and optional rating/notes
+        user_id: Extracted from JWT token
         
     Returns:
         Feedback confirmation
+        
+    Raises:
+        ValidationError: If feedback is invalid
     """
+    if feedback.feedback_type == "rated" and not feedback.rating:
+        raise ValidationError("Rating required for 'rated' feedback type")
+    
     # Verify persona belongs to user
     persona = db_session.query(models.UserPersona).filter(
         models.UserPersona.id == persona_id,
@@ -61,43 +69,94 @@ def submit_persona_feedback(
     if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")
     
-    # Create feedback record
-    feedback_record = models.PersonaFeedback(
-        user_id=user_id,
-        persona_id=persona_id,
-        feedback_type=feedback.feedback_type,
-        rating=feedback.rating,
-        notes=feedback.notes,
-    )
-    db_session.add(feedback_record)
-    
-    # If rejected, optionally decrease weight
-    if feedback.feedback_type == "rejected" and persona.weight > 1:
-        persona.weight = max(1, persona.weight - 1)
-    # If approved, increase weight
-    elif feedback.feedback_type == "approved" and persona.weight < 10:
-        persona.weight = min(10, persona.weight + 1)
-    
-    db_session.commit()
-    logger.info(f"[user_id={user_id}] Feedback on persona {persona_id}: {feedback.feedback_type}")
-    
-    return {
-        "status": "recorded",
-        "persona_id": persona_id,
-        "feedback_type": feedback.feedback_type,
-        "new_weight": persona.weight,
-    }
+    try:
+        # Create feedback record
+        feedback_record = models.PersonaFeedback(
+            user_id=user_id,
+            persona_id=persona_id,
+            feedback_type=feedback.feedback_type,
+            rating=feedback.rating,
+            notes=feedback.notes,
+        )
+        db_session.add(feedback_record)
+        
+        # If rejected, optionally decrease weight
+        if feedback.feedback_type == "rejected" and persona.weight > 1:
+            persona.weight = max(1, persona.weight - 1)
+        # If approved, increase weight
+        elif feedback.feedback_type == "approved" and persona.weight < 10:
+            persona.weight = min(10, persona.weight + 1)
+        
+        db_session.commit()
+        logger.info(f"[user_id={user_id}] Feedback on persona {persona_id}: {feedback.feedback_type}")
+        
+        return {
+            "status": "recorded",
+            "persona_id": persona_id,
+            "feedback_type": feedback.feedback_type,
+            "new_weight": persona.weight,
+        }
+    except Exception as e:
+        db_session.rollback()
+        logger.error(f"[user_id={user_id}] Failed to submit feedback: {e}")
+        raise
 
 
 @router.get("/persona/{persona_id}")
 def get_persona_feedback(
-    user_id: int,
     persona_id: int,
+    user_id: int = Depends(get_current_user),
     db_session: Session = Depends(get_db),
 ):
     """Get feedback history for a persona.
     
     Args:
+        persona_id: Persona ID
+        user_id: Extracted from JWT token
+        
+    Returns:
+        Feedback history
+    """
+    feedback_records = db_session.query(models.PersonaFeedback).filter(
+        models.PersonaFeedback.persona_id == persona_id,
+        models.PersonaFeedback.user_id == user_id,
+    ).all()
+    
+    return {
+        "persona_id": persona_id,
+        "feedback_count": len(feedback_records),
+        "feedback": [
+            {
+                "id": f.id,
+                "type": f.feedback_type,
+                "rating": f.rating,
+                "notes": f.notes,
+                "created_at": f.created_at.isoformat() if f.created_at else None,
+            }
+            for f in feedback_records
+        ],
+    }
+
+
+@router.get("/metrics", response_model=MetricsResponse)
+def get_user_metrics(
+    user_id: int = Depends(get_current_user),
+):
+    """Get aggregated metrics for a user.
+    
+    Args:
+        user_id: Extracted from JWT token
+        
+    Returns:
+        User metrics
+    """
+    try:
+        metrics = MetricsService.get_user_metrics(user_id)
+        logger.info(f"[user_id={user_id}] Retrieved metrics")
+        return MetricsResponse(**metrics)
+    except Exception as e:
+        logger.error(f"[user_id={user_id}] Failed to get metrics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get metrics")
         user_id: User ID
         persona_id: Persona ID
         

@@ -1,13 +1,13 @@
 import logging
 import re
-import google.generativeai as genai
+import google.genai
 from deepgram import DeepgramClient
 from ..config import settings
 
 logger = logging.getLogger(__name__)
 
 dg_client = DeepgramClient(api_key=settings.deepgram_api_key)
-genai.configure(api_key=settings.gemini_api_key)
+genai_client = google.genai.Client(api_key=settings.gemini_api_key)
 
 # Filler words to remove from extracted interests
 FILLER_WORDS = {

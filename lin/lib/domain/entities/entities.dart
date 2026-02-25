@@ -30,7 +30,7 @@ class Persona {
   final int id;
   final int? userId;
   final String label;
-  final int weight;
+  final double weight;
   final double? confidenceScore;
   final DateTime? createdAt;
   final List<String>? feedbackHistory;
@@ -50,7 +50,7 @@ class Persona {
       id: json['id'],
       userId: json['user_id'],
       label: json['label'],
-      weight: json['weight'] ?? 1,
+      weight: (json['weight'] is num) ? (json['weight'] as num).toDouble() : (json['weight'] ?? 1).toDouble(),
       confidenceScore: (json['confidence_score'] as num?)?.toDouble(),
       createdAt: json['created_at'] != null 
           ? DateTime.parse(json['created_at']) 
@@ -70,7 +70,7 @@ class Persona {
     int? id,
     int? userId,
     String? label,
-    int? weight,
+    double? weight,
     double? confidenceScore,
     DateTime? createdAt,
   }) {

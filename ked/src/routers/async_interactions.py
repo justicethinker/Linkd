@@ -9,15 +9,20 @@ State Machine: PENDING → TRANSCRIPTION → ENRICHMENT → SYNTHESIS → SUCCES
 
 import logging
 import json
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, Form
+import tempfile
+import os
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, Form, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 from .. import db
 from ..services import storage_service
 from ..workflows import start_interaction_workflow, get_workflow_status, cancel_workflow
 from ..models import Job
+from ..auth import get_current_user
+from ..exceptions import ValidationError, ExternalServiceError
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v2", tags=["async-interactions"])
@@ -33,26 +38,36 @@ def get_db():
         session.close()
 
 
+def _validate_file_size(file_size: int) -> None:
+    """Validate file size doesn't exceed limit."""
+    max_size = settings.max_upload_size_mb * 1024 * 1024
+    if file_size > max_size:
+        raise ValidationError(
+            f"File size exceeds maximum ({settings.max_upload_size_mb}MB)",
+            {"max_size_mb": settings.max_upload_size_mb},
+        )
+
+
 class InteractionSubmitRequest(BaseModel):
     """Request to submit an interaction for async processing."""
-    mode: str = "recap"  # 'live' or 'recap'
+    mode: str = Field("recap", pattern="^(live|recap)$")  # 'live' or 'recap'
     
 
 class WorkflowStatusResponse(BaseModel):
     """Response containing workflow status and progress."""
     job_id: str
     task_id: str
-    state: str  # PENDING, TRANSCRIPTION, ENRICHMENT, SYNTHESIS, SUCCESS, ERROR
+    state: str = Field(..., pattern="^(PENDING|TRANSCRIPTION|ENRICHMENT|SYNTHESIS|SUCCESS|ERROR)$")
     progress: str
     result: Optional[dict] = None
     error: Optional[str] = None
 
 
-@router.post("/interactions/submit")
+@router.post("/interactions/submit", status_code=status.HTTP_202_ACCEPTED)
 async def submit_interaction_async(
-    user_id: int,
     file: UploadFile,
     mode: str = Form("recap"),
+    user_id: int = Depends(get_current_user),
     db_session: Session = Depends(get_db),
 ) -> dict:
     """Submit an interaction for asynchronous distributed processing.
@@ -65,9 +80,9 @@ async def submit_interaction_async(
     Returns immediately with job_id for polling progress.
     
     Args:
-        user_id: User ID
         file: Audio file upload
         mode: 'live' (diarized, other speaker extraction) or 'recap' (entity extraction)
+        user_id: Extracted from JWT token
         db_session: Database session
         
     Returns:
@@ -77,28 +92,41 @@ async def submit_interaction_async(
             "state": "PENDING",
             "status_url": "/v2/interactions/status/uuid-job-id"
         }
+        
+    Raises:
+        ValidationError: If input is invalid
+        ExternalServiceError: If workflow startup fails
     """
     import uuid
-    import tempfile
-    import os
+    
+    if mode not in ["live", "recap"]:
+        raise ValidationError(f"Invalid mode: {mode}. Must be 'live' or 'recap'")
+    
+    if not file.filename or not file.filename.endswith(('.wav', '.mp3', '.ogg')):
+        raise ValidationError("File must be an audio file (WAV, MP3, or OGG)")
+    
+    if file.size:
+        _validate_file_size(file.size)
     
     job_id = str(uuid.uuid4())
+    tmp_path = None
     logger.info(f"[job_id={job_id}] New async interaction submission (user_id={user_id}, mode={mode})")
     
     try:
         # Save audio file temporarily
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
             content = await file.read()
+            _validate_file_size(len(content))
             tmp.write(content)
             tmp_path = tmp.name
         
         # Upload to S3 with 24-hour expiration metadata
+        s3_key = None
         try:
             s3_key = storage.upload_audio_file(user_id, tmp_path, f"{job_id}.wav")
             logger.info(f"[job_id={job_id}] Audio uploaded to S3: {s3_key}")
         except Exception as s3_error:
             logger.warning(f"[job_id={job_id}] S3 upload failed, using local storage: {s3_error}")
-            s3_key = None
         
         # Create Job tracking record
         job = Job(
