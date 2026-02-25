@@ -6,11 +6,13 @@ Routed to the 'transcription' worker queue.
 
 import logging
 import tempfile
+import os
 from celery import Task
 from ..celery_app import app
 from ..services import deepgram_integration
 from ..db import SessionLocal
 from ..models import Conversation, InteractionMetric
+from ..supabase_client import SupabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,62 @@ class TranscriptionTask(Task):
     retry_backoff = True
     retry_backoff_max = 600  # 10 minutes max
     retry_jitter = True
+
+
+@app.task(bind=True, base=TranscriptionTask, name="src.tasks.transcription_tasks.transcribe_audio_bytes")
+def transcribe_audio_bytes(self, user_id: int, job_id: str, audio_bytes: bytes, mode: str = "recap"):
+    """Transcribe audio given raw bytes. Writes to a temp file on the worker.
+
+    This allows the ingest controller to dispatch transcription immediately
+    without waiting for storage upload to complete.
+    """
+    logger.info(f"[job_id={job_id}] Starting byte-based transcription (mode={mode})")
+    self.update_state(state="TRANSCRIPTION", meta={"progress": "Transcribing audio with Deepgram (bytes)..."})
+
+    tmp = None
+    try:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".opus")
+        tmp.write(audio_bytes)
+        tmp.flush()
+        tmp.close()
+
+        diarize = mode == "live"
+        transcript_data = deepgram_integration.transcribe_audio(tmp.name, diarize=diarize)
+
+        if mode == "live":
+            extracted_interests = deepgram_integration.extract_other_speaker_interests(transcript_data)
+        else:
+            entities = deepgram_integration.extract_entities_from_transcript(transcript_data)
+            extracted_interests = " ".join(entities)
+
+        logger.info(f"[job_id={job_id}] Byte transcription complete: {extracted_interests[:100]}...")
+
+        # Update recordings row in Supabase with transcript JSON and mark completed
+        try:
+            client = SupabaseManager.get_client()
+            client.table("recordings").update({"transcript_json": transcript_data, "status": "completed"}).eq("job_id", job_id).eq("user_id", user_id).execute()
+            logger.info(f"[job_id={job_id}] Updated recordings row with transcript_json")
+        except Exception as e:
+            logger.warning(f"[job_id={job_id}] Failed to update recordings row with transcript: {e}")
+
+        return {
+            "user_id": user_id,
+            "job_id": job_id,
+            "extracted_interests": extracted_interests,
+            "mode": mode,
+        }
+
+    except Exception as e:
+        logger.error(f"[job_id={job_id}] Byte transcription failed: {e}")
+        self.update_state(state="TRANSCRIPTION_FAILED", meta={"error": str(e)})
+        raise
+
+    finally:
+        try:
+            if tmp and tmp.name and tmp.name.startswith(tempfile.gettempdir()):
+                os.unlink(tmp.name)
+        except Exception:
+            pass
 
 
 @app.task(bind=True, base=TranscriptionTask, name="src.tasks.transcription_tasks.transcribe_audio")
@@ -52,9 +110,17 @@ def transcribe_audio(self, user_id: int, job_id: str, audio_file_path: str, mode
         else:
             entities = deepgram_integration.extract_entities_from_transcript(transcript_data)
             extracted_interests = " ".join(entities)
-        
+
         logger.info(f"[job_id={job_id}] Transcription complete: {extracted_interests[:100]}...")
-        
+
+        # Update recordings row in Supabase with transcript JSON and mark completed
+        try:
+            client = SupabaseManager.get_client()
+            client.table("recordings").update({"transcript_json": transcript_data, "status": "completed"}).eq("job_id", job_id).eq("user_id", user_id).execute()
+            logger.info(f"[job_id={job_id}] Updated recordings row with transcript_json")
+        except Exception as e:
+            logger.warning(f"[job_id={job_id}] Failed to update recordings row with transcript: {e}")
+
         return {
             "user_id": user_id,
             "job_id": job_id,

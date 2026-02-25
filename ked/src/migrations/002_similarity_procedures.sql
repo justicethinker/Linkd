@@ -93,25 +93,18 @@ BEGIN
     RETURN QUERY
     WITH interest_similarities AS (
         SELECT
-            p_label,
-            persona_id,
-            persona_label,
-            similarity,
-            (similarity * weight / 10.0) as weighted_score
-        FROM (
-            SELECT DISTINCT
-                'extracted_interest'::VARCHAR as p_label,
-                up.id as persona_id,
-                up.label as persona_label,
-                (1 - (up.vector <=> p_embedding))::FLOAT as similarity,
-                up.weight
-            FROM user_persona up
-            WHERE up.user_id = p_user_id
-                AND (1 - (up.vector <=> p_embedding)) >= p_threshold
-        ) t
+            'extracted_interest'::VARCHAR as interaction_label,
+            up.id as persona_id,
+            up.label as persona_label,
+            (1 - (up.vector <=> p_embedding))::FLOAT as base_similarity,
+            ((1 - (up.vector <=> p_embedding)) * up.weight / 10.0)::FLOAT as weighted_score
+        FROM user_persona up
+        WHERE up.user_id = p_user_id
+            AND (1 - (up.vector <=> p_embedding)) >= p_threshold
         ORDER BY weighted_score DESC
         LIMIT p_limit
     )
-    SELECT * FROM interest_similarities;
+    SELECT interaction_label, persona_id, persona_label, base_similarity, weighted_score 
+    FROM interest_similarities;
 END;
 $$ LANGUAGE plpgsql;

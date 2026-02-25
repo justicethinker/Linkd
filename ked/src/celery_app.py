@@ -12,10 +12,20 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 # Initialize Celery app
+# Use full Redis URL if provided, otherwise construct from host/port
+if settings.redis_url:
+    # Handle db number in URL - append /0 for broker and /1 for backend
+    base_url = settings.redis_url.rstrip('/')
+    broker_url = f"{base_url}/0"
+    backend_url = f"{base_url}/1"
+else:
+    broker_url = f"redis://{settings.redis_host}:{settings.redis_port}/0"
+    backend_url = f"redis://{settings.redis_host}:{settings.redis_port}/1"
+
 app = Celery(
     "linkd",
-    broker=f"redis://{settings.redis_host}:{settings.redis_port}/0",
-    backend=f"redis://{settings.redis_host}:{settings.redis_port}/1",
+    broker=broker_url,
+    backend=backend_url,
 )
 
 # Configure Celery

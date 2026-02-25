@@ -11,6 +11,11 @@ logger = logging.getLogger(__name__)
 # SQLAlchemy database URL
 DATABASE_URL = settings.database_url
 
+# Log database connection info (masking sensitive parts)
+if DATABASE_URL:
+    masked_url = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else DATABASE_URL
+    logger.info(f"Using PostgreSQL database at {masked_url}")
+
 # create engine with pgvector extension support
 engine = create_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -78,7 +83,7 @@ def _apply_rls():
     """Apply row-level security policies.
 
     Note: These are also defined in the migration files, but we can re-apply them here
-    as an extra safety measure. This is idempotent due to the use of CREATE POLICY IF NOT EXISTS.
+    as an extra safety measure.
     """
     policies = [
         (
@@ -103,10 +108,17 @@ def _apply_rls():
             try:
                 # Enable RLS on the table
                 conn.execute(text(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;"))
-                # Create policy (safe even if it exists)
+                
+                # Try to drop existing policy first (for idempotency)
+                try:
+                    conn.execute(text(f"DROP POLICY IF EXISTS {policy_name} ON {table};"))
+                except Exception:
+                    pass  # Policy may not exist
+                
+                # Create policy
                 conn.execute(
                     text(
-                        f"CREATE POLICY IF NOT EXISTS {policy_name} ON {table} "
+                        f"CREATE POLICY {policy_name} ON {table} "
                         f"USING ({policy_condition});"
                     )
                 )
@@ -114,22 +126,35 @@ def _apply_rls():
                 logger.info(f"Applied RLS policy: {policy_name} on {table}")
             except Exception as e:
                 logger.warning(f"Could not apply RLS policy {policy_name}: {e}")
-                conn.rollback()
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
 
 
 # Redis cache for Phase 2 (Celery task states and temporary data)
 try:
     import redis
-    redis_cache = redis.Redis(
-        host=settings.redis_host,
-        port=settings.redis_port,
-        db=2,  # Use DB 2 for application cache (0=broker, 1=result backend)
-        decode_responses=True,
-        socket_connect_timeout=5,
-    )
+    # Use full URL if provided, otherwise construct from host/port
+    if settings.redis_url:
+        redis_cache = redis.from_url(
+            settings.redis_url,
+            db=2,  # Use DB 2 for application cache (0=broker, 1=result backend)
+            decode_responses=True,
+            socket_connect_timeout=5,
+        )
+        logger.info(f"Connected to Redis using URL from REDIS_URL")
+    else:
+        redis_cache = redis.Redis(
+            host=settings.redis_host,
+            port=settings.redis_port,
+            db=2,  # Use DB 2 for application cache (0=broker, 1=result backend)
+            decode_responses=True,
+            socket_connect_timeout=5,
+        )
+        logger.info(f"Connected to Redis at {settings.redis_host}:{settings.redis_port}")
     # Test connection
     redis_cache.ping()
-    logger.info(f"Connected to Redis at {settings.redis_host}:{settings.redis_port}")
 except Exception as e:
     logger.warning(f"Could not connect to Redis: {e}. Caching disabled.")
     redis_cache = None
